@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.dcd
+*.xtc
+*.chk
+*.xml
+*.npz
+*.log
+Iterations*/
+png*/
+comp*/
+seq*/

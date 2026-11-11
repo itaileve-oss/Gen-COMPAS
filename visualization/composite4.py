@@ -1,0 +1,27 @@
+import json, os, numpy as np, matplotlib; matplotlib.use('Agg'); import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+L=os.environ.get('MOVIE_DIR','.'); os.makedirs(f'{L}/comp4',exist_ok=True)
+Z=np.load(f'{L}/fes_it3.npz'); F,e0,e1=Z['F'],Z['e0'],Z['e1']; c0=.5*(e0[1:]+e0[:-1]); c1=.5*(e1[1:]+e1[:-1])
+J=json.load(open(f'{L}/nodes_v3.json')); P=np.array(J['path']); bmin=J['bmin']
+cv=np.loadtxt(f'{L}/v3_cvs.csv',delimiter=',',skiprows=1); rm=np.loadtxt(f'{L}/v3_rmsd.csv',delimiter=',',skiprows=1)
+n=len(cv)
+for i in range(n):
+    fig=plt.figure(figsize=(19.2,7.2),dpi=100)
+    a1=fig.add_axes([0.0,0.08,0.31,0.84]); a2=fig.add_axes([0.29,0.08,0.31,0.84]); a3=fig.add_axes([0.66,0.40,0.27,0.50]); a4=fig.add_axes([0.66,0.10,0.27,0.20])
+    a1.imshow(mpimg.imread(f'{L}/png4/top_{i+1:04d}.png')); a1.axis('off'); a1.set_title('top view (3-fold axis), chain B held fixed',fontsize=13)
+    a2.imshow(mpimg.imread(f'{L}/png4/side_{i+1:04d}.png')); a2.axis('off'); a2.set_title('side view (chain C–A interface)',fontsize=13)
+    m=a3.pcolormesh(e0,e1,np.where(F<9,F,np.nan).T,cmap='viridis',vmin=0,vmax=8); a3.contour(c0,c1,F.T,levels=[1,2,3,4,5],colors='k',linewidths=0.5)
+    a3.plot(P[:,0],P[:,1],'w-',lw=1.5); a3.plot(cv[:i+1,1],cv[:i+1,3],'-',color='red',lw=1.5)
+    a3.plot(19.90,9.43,'s',ms=10,mfc='none',mec='0.8',mew=2); a3.text(19.0,8.9,'1TNF',color='0.85',fontsize=11,weight='bold')
+    a3.plot(24.16,14.01,'s',ms=10,mfc='none',mec='gold',mew=2); a3.text(23.2,14.25,'7JRA',color='gold',fontsize=11,weight='bold')
+    a3.plot(*bmin,'s',ms=8,mfc='none',mec='w',mew=1.5); a3.text(bmin[0]+0.2,bmin[1]-0.45,'B min',color='w',fontsize=10)
+    a3.plot(cv[i,1],cv[i,3],'o',ms=12,mfc='red',mec='w',mew=2)
+    a3.set_xlim(18.8,25.5); a3.set_ylim(8.6,14.8); a3.set_xlabel('S1 (Å)'); a3.set_ylabel('S3 (Å)'); a3.set_title('Gen-COMPAS iteration 3 FES',fontsize=12)
+    fig.colorbar(m,ax=a3,label='F (kcal/mol)',fraction=0.05)
+    a4.plot(rm[:,0],color='0.4',lw=2,label='to 1TNF (symmetric)'); a4.plot(rm[:,1],color='goldenrod',lw=2,label='to 7JRA (asymmetric)')
+    a4.axvline(i,color='red',lw=1.5); a4.set_xlim(0,n-1); a4.set_ylim(1.2,3.2); a4.set_ylabel('CA RMSD (Å)'); a4.set_xticks([]); a4.legend(fontsize=9,loc='upper center',ncol=2)
+    fig.text(0.62,0.025,f'S1 {cv[i,1]:5.2f} Å   S3 {cv[i,3]:5.2f} Å   RMSD 1TNF {rm[i,0]:4.2f}  7JRA {rm[i,1]:4.2f} Å',fontsize=13,family='monospace')
+    fig.text(0.01,0.95,'TNF-α apo trimer: symmetric → asymmetric, real MD frames stitched along the free-energy path',fontsize=16,weight='bold')
+    fig.text(0.01,0.02,'chain A slate · B grey · C salmon · red = chain C loop 102–109 · ghosts: 1TNF grey, 7JRA gold | 40 real frames from different 2-ns trajectories,\nchosen for continuity, linearly interpolated between them; no single trajectory makes this transition',fontsize=10.5,color='0.3')
+    fig.savefig(f'{L}/comp4/c_{i:04d}.png'); plt.close(fig)
+print('composited',n)

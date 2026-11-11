@@ -1,0 +1,185 @@
+# v4 FRESH RUN (2026-11-08, user: "start a fresh run from scratch applying all what we have learned,
+# default Gen-COMPAS protocol, 4 iterations"). Changes vs tnf.workflow.yaml, all learned 2026-11-07/08:
+#  - iteration-0 diffusion epochs 300 (50 under-trained -> mean collapse; expA 300 matched Trp-cage control)
+#  - TMD on ALL HEAVY ATOMS (3570), 500 ps, TMDk 783000 = 1e5 x 3570/456 (same per-atom stiffness, NAMD k/N);
+#    heavy selection as in their NANMA/Trialanine examples; templates in NAMD_inputs_v4
+#  - RiteWeight patched in the repo (ergodic trimming; shipped code -> NaN)
+# Unchanged: nAChR noise schedule 10/10/5/3, epochs 1-3 = 20/10/10 (warm start), 20 targets, 2 ns unbiased.
+# Gen-COMPAS workflow for apo TNF trimer, symmetric (A, 1TNF) -> asymmetric (B, 7JRA w/o ligand).
+# Based on the shipped nAChR config (closest analogue: large symmetric oligomer, 4 fs MD,
+# TMDk 10000); only system-specific values are changed. MD runs through src/gc_md.py
+# (OpenMM) instead of NAMD - see NAMD.execution below.
+#
+# Launch with  export GC_CPU_BLOCKS="0-9;10-19"  (gc_md.py pins each parallel job to a block).
+# Run from /workspace/gc/gencompas, ALWAYS stepwise for a new system (README):
+#   gen-compas --config tnf.workflow.yaml --iteration 0 --dry-run
+#   gen-compas --config tnf.workflow.yaml --iteration 0 --stepwise
+#
+# Plan agreed 2026-11-06: run the DEFAULT iteration 0 (diffusion-generated targets) first;
+# GATE before the namd stage: plot generated structures on S1/S3 + theta-spread vs the
+# eBDIMS2 path. Only if they fail to span A->B, retry iteration-0 MD with eBDIMS2 targets.
+#
+# Systems: wild-type (D143) A and B with IDENTICAL protein atom lists (7134 atoms,
+# chains A/B/C = Arg6..Leu157). CVs are the paper's S1/S2/S3 on subunit pair C->A,
+# which is the distorted interface of B after the C:A,B:B,A:C chain relabelling.
+# Distances in Angstrom.
+
+Workflow:
+  root_dir: "/workspace/gc/Iterations_v4"
+  initial_data_folders: []
+  initial_diffusion_data:
+    dcd_path: "/workspace/gc/data/initial_noh.dcd"      # A + B 5 ns unbiased, heavy atoms
+    topology_path: "/workspace/gc/gencompas/TOP_files/protein_noh.psf"
+  run_initial_unbiased: false
+  run_fel: true
+  warm_start_diffusion: true
+  isolate_steps: true
+  iteration_noise_scales: {0: 10.0, 1: 10.0, 2: 5.0, 3: 3.0, 4: 3.0, 5: 3.0, 6: 3.0, 7: 3.0}     # nAChR schedule
+  iteration_diffusion_epochs: {0: 300, 1: 20, 2: 10, 3: 10, 4: 10, 5: 10, 6: 10, 7: 10}   # v4: 0 -> 300
+
+Generative:
+  device: "cuda:0"
+  random_seed: 42
+  model:
+    node_feature_dim: 64
+    time_embedding_dim: 128
+    hidden_dim: 128
+    num_schnet_layers: 4
+    num_gat_layers: 2
+    residue_attn_heads: 4
+    k_neighbors: 16
+  diffusion:
+    timesteps: 200
+    beta_schedule: "cosine"
+  training:
+    epochs: 50
+    batch_size: 8            # nAChR used 2 (16k heavy atoms); TNF has 3570 - check 12 GB VRAM
+    lr: 1.0e-4
+    weight_decay: 1.0e-6
+    grad_clip: 1.0
+    num_workers: 0
+    save_interval: 50
+  inference:
+    num_samples: 6000       # 2026-11-10: iter-5 slice had only 8/3000 in q 0.3-0.7; was 3000
+    sample_batch: 100
+    noise_scale: 10.0
+
+VCN:
+  device: "cuda:0"
+  atomselect: "name CA"
+  stride: 10
+  time_shift: 2
+  cvs: ["S1", "S2", "S3", "theta_spread"]
+  cvs_to_plot: ["S1", "S3"]
+  epochs: 500
+  learning_rate: 1.0e-4
+  patience: 20
+  num_layers: 4
+  num_nodes: 128
+  k: 1.0
+  q_variance: 0.2        # 2026-11-09: was 0.1; iter-2 VCN only 7/3000 in 0.4-0.6, 28 in 0.3-0.7
+  n_targets: 20
+  require_n_targets: false   # 2026-11-10: use all candidates in q 0.3-0.7 if <20 (iter 5)
+
+Clustering:
+  atom_selection: "name CA"
+  n_clusters: 10
+  n_per_cluster: 1
+  max_k: 20
+  select_farthest: true        # 10 clusters x (closest + farthest) = 20 targets
+
+Occupancy:
+  topology_file: "/workspace/gc/gencompas/TOP_files/protein.psf"
+  pdb_file: "/workspace/gc/gencompas/TOP_files/protein.pdb"
+  add_hydrogens: true
+  selection: "element != H"     # v4: TMD on all 3570 heavy atoms
+
+NAMD:
+  # {namd} = python of the MD env; gc_md.py takes the NAMD role.
+  namd_path: "/opt/micromamba/envs/tnfmd/bin/python"
+  template_path: "/workspace/gc/gencompas/NAMD_inputs_v4"
+  tmd_force_constant: 783000.0  # v4: 1e5 x 3570/456 for heavy atoms;  # scanned 2026-11-07 (10k/30k/100k, 2 targets x A/B, 100 ps): only 1e5 reaches ~1.2-1.3 A
+  existing_job_policy: "error"
+  protocols:
+    - name: "A"
+      tmd_template: "TMD.A.conf"
+      unbiased_template: "Unbiased.A.conf"
+      initial_unbiased_template: "Unbiased.A.conf"
+    - name: "B"
+      tmd_template: "TMD.B.conf"
+      unbiased_template: "Unbiased.B.conf"
+      initial_unbiased_template: "Unbiased.B.conf"
+  phases:
+    tmd: true
+    unbiased: true
+  execution:
+    device: "gpu"
+    parallel_jobs: 2            # measured: 2 pinned jobs 516 ns/day total; 3 only ~550
+    gpu:
+      devices: ["0", "0"]
+      threads_per_job: 1
+      command: ["{namd}", "/workspace/gc/src/gc_md.py", "--device", "{device}", "{config}"]
+
+RiteWeight:
+  dcd_pattern: "*unbias.[AB].dcd"
+  colvars_pattern: "*unbias.[AB].colvars.traj"
+  tag_regex: "\\.([AB])(?:\\.|$)"
+  io:
+    topology: "/workspace/gc/gencompas/TOP_files/protein.psf"   # gc_md.py DCDs keep H
+    stride: 1
+  pairing:
+    allow_skip_first_colvars: true
+    strict: false
+  features:
+    mode: "internal_zmat"
+    internal_zmat:
+      atomselect: "name CA"
+      atom_order: null
+      max_atoms: null
+      order: "index"
+  riteweight:
+    n_clusters: 100
+    n_iter: 50
+    tol: 1.0e-6
+    tol_window: 5
+    avg_last: 30
+    seed: 2026
+    lag: 25                     # frames (20 ps) = 500 ps; nAChR used 50 but on longer data - 2 ns runs
+  colvars:
+    cv: ["S1", "S3"]            # code accepts 1 or 2 columns
+    save_cols: "all"
+    periodic_cols: []
+    bins: [200, 200]
+    temperature_K: 310.0
+  committor_labels:
+    enabled: true
+    cvs_to_label: ["S1", "S3"]
+    # MEASURED 2026-11-07 from the v2 wild-type endpoints (9 ns staged restrained
+    # equilibration, then 5 ns unbiased; last 4 ns, pair C->A), S1/S3 in A:
+    #   A 20.49+/-0.35, 9.46+/-0.23   B 23.95+/-0.65, 12.67+/-0.58
+    # (v1 basins 20.43/9.06 and 21.74/9.85 came from a B that collapsed in prep - discarded.)
+    # Half-widths ~1-2 sigma; boxes do not overlap (S1 A<=21.19 < B>=23.25).
+    basin_A: [20.0, 9.8]          # 2026-11-10: moved to FES minimum (iter-3 RW); was [20.49, 9.46] (prepared endpoint)
+    basin_B: [22.7, 12.0]         # 2026-11-10: moved to FES minimum (iter-3 RW); was [23.95, 12.67]
+    basin_size: [0.5, 0.4]        # was [0.7, 0.5]; smaller to stay inside the FES basins
+    k_prefactor: 1.0
+    angle_unit: "degree"
+
+FEL_estimate:
+  temperature_K: 310.0
+  landscape_F_max: 10.0
+  projections:
+    - name: "S1_S3"
+      cvs: ["S1", "S3"]
+      bins: [200, 200]
+      ranges: [[17.0, 26.0], [7.0, 17.0]]
+      periodicities: [false, false]
+      sigma_bins: [1.0, 1.0]
+      F_max: 10.0
+    - name: "S1_theta"
+      cvs: ["S1", "theta_spread"]
+      bins: [200, 200]
+      ranges: [[17.0, 26.0], [0.0, 15.0]]
+      periodicities: [false, false]
+      sigma_bins: [1.0, 1.0]
+      F_max: 10.0
