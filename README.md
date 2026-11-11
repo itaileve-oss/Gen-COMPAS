@@ -26,6 +26,25 @@ over all unbiased segments and gives equilibrium frame weights, from which the f
 landscape is computed. No single trajectory has to cross the barrier. The landscape is
 stitched together from many overlapping short trajectories.
 
+## Quick start with Docker (everything preinstalled)
+
+A ready-to-run image is built automatically from this repo and published to the GitHub
+Container Registry:
+
+```bash
+docker pull ghcr.io/itaileve-oss/gen-compas:latest
+docker run --gpus all -it -v $PWD:/workspace ghcr.io/itaileve-oss/gen-compas:latest
+```
+
+It contains both environments (`tnfmd` and `gen-compas`; `/opt/micromamba/envs/...` paths as
+in the configs), upstream Gen-COMPAS at the pinned commit with our patch applied
+(`/opt/Gen-COMPAS`), and this repository (`/opt/gen-compas-workflow`). It needs an NVIDIA
+driver supporting CUDA ≥ 12.6.
+
+**On vast.ai:** create a template with image `ghcr.io/itaileve-oss/gen-compas:latest`
+(launch mode SSH), pick a GPU, and start. Then copy your system's inputs to `/workspace`
+and run the workflow, with no environment setup needed.
+
 ## Install
 
 ```bash
